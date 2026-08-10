@@ -79,6 +79,20 @@ its interface/config. To skip the model picker and use OpenCode's saved/default 
 python scripts/run_ideagent_opencode.py --skip-model-picker
 ```
 
+### Ollama backend
+
+To route calls straight to local Ollama with no provider API key:
+
+```bash
+ollama pull llama3.2
+python scripts/run_ideagent_ollama.py --model llama3.2
+```
+
+The wrapper reuses Ollama if it is already listening at `localhost:11434`; otherwise it
+starts `ollama serve`, waits for it, runs IDEAgent, and shuts down the server it
+launched. If `--model` is omitted, it uses `$OLLAMA_MODEL`, then the first installed
+Ollama model from `/api/tags`.
+
 ## 🚀 Run IDEAgent (main system)
 
 ```bash

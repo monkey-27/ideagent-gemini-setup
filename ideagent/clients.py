@@ -1,8 +1,8 @@
 """LLM clients for the agentic ideation system.
 
-vLLM (OpenAI-compatible, local server), OpenCode (local opencode server), Gemini
-(google-genai), OpenAI-hosted (real api.openai.com), and Claude (anthropic's direct
-Anthropic API client) backends.
+vLLM (OpenAI-compatible, local server), OpenCode (local opencode server), Ollama
+(local native chat API), Gemini (google-genai), OpenAI-hosted (real api.openai.com), and
+Claude (anthropic's direct Anthropic API client) backends.
 ``build_client`` routes any model whose name starts with ``gemini`` or ``gemma`` to the
 Gemini backend (its port is ignored) -- Gemma models are served through the same
 google.genai.Client as Gemini -- any model starting with ``gpt-`` to the OpenAI backend
@@ -408,6 +408,110 @@ class OpenCodeClient(_ResponseMetadataMixin):
                 "response_model": self.model_id,
             })
         self._set_response_metadata({"opencode_calls": metadata})
+        return outputs
+
+    async def generate_async(self, messages: list[dict[str, str]], **kwargs: Any) -> str:
+        return await asyncio.to_thread(self.generate, messages, **kwargs)
+
+
+class OllamaClient(_ResponseMetadataMixin):
+    """Client for a running local Ollama server using its native `/api/chat` endpoint."""
+
+    def __init__(
+        self,
+        *,
+        model_id: str | None,
+        base_url: str = "http://localhost:11434",
+        timeout: float = 120.0,
+    ) -> None:
+        if not model_id:
+            raise ValueError(
+                "Pass a model id for the Ollama backend, e.g. `llama3.2`, "
+                "or run scripts/run_ideagent_ollama.py --model <model>."
+            )
+        self.model_id = model_id
+        self.base_url = base_url.rstrip("/")
+        self.timeout = float(timeout)
+        self._init_response_metadata()
+
+    def _request(self, path: str, payload: dict[str, Any]) -> Any:
+        body = json.dumps(payload).encode("utf-8")
+        request = urllib.request.Request(
+            f"{self.base_url}{path}",
+            data=body,
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                raw = response.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(
+                f"Ollama server returned HTTP {exc.code} for {path}: {detail}"
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(
+                f"Could not reach Ollama server at {self.base_url}. "
+                "Start it with `ollama serve` or run scripts/run_ideagent_ollama.py."
+            ) from exc
+        return json.loads(raw) if raw.strip() else None
+
+    def _chat_body(self, messages: list[dict[str, str]], kwargs: dict[str, Any]) -> dict[str, Any]:
+        options: dict[str, Any] = {
+            "temperature": float(kwargs.get("temperature", 0.7)),
+            "top_p": float(kwargs.get("top_p", 0.95)),
+            "num_predict": int(kwargs.get("max_new_tokens", 8192)),
+        }
+        top_k = kwargs.get("top_k")
+        if top_k is not None:
+            options["top_k"] = int(top_k)
+        body: dict[str, Any] = {
+            "model": kwargs.get("model_id") or self.model_id,
+            "messages": messages,
+            "stream": False,
+            "options": options,
+        }
+        response_format = kwargs.get("response_format")
+        if response_format is not None:
+            schema = (response_format.get("json_schema") or {}).get("schema")
+            body["format"] = schema or "json"
+        return body
+
+    @staticmethod
+    def _extract_text(response: Any) -> str:
+        if not isinstance(response, dict):
+            raise ValueError("Ollama response was not a JSON object")
+        message = response.get("message")
+        if not isinstance(message, dict):
+            raise ValueError("Ollama response did not contain a message object")
+        content = message.get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("Ollama response message did not contain content")
+        return content.strip()
+
+    def generate(self, messages: list[dict[str, str]], **kwargs: Any) -> str:
+        return self.generate_many(messages, n=1, **kwargs)[0]
+
+    @_retry
+    def generate_many(self, messages: list[dict[str, str]], *, n: int = 1, **kwargs: Any) -> list[str]:
+        if int(n) <= 0:
+            raise ValueError("n must be a positive integer")
+        outputs: list[str] = []
+        metadata: list[dict[str, Any]] = []
+        for _ in range(int(n)):
+            body = self._chat_body(messages, kwargs)
+            response = self._request("/api/chat", body)
+            outputs.append(self._extract_text(response))
+            metadata.append({
+                "response_model": response.get("model") if isinstance(response, dict) else None,
+                "done_reason": response.get("done_reason") if isinstance(response, dict) else None,
+                "total_duration": response.get("total_duration") if isinstance(response, dict) else None,
+                "load_duration": response.get("load_duration") if isinstance(response, dict) else None,
+                "prompt_eval_count": response.get("prompt_eval_count") if isinstance(response, dict) else None,
+                "eval_count": response.get("eval_count") if isinstance(response, dict) else None,
+            })
+        self._set_response_metadata({"ollama_calls": metadata})
         return outputs
 
     async def generate_async(self, messages: list[dict[str, str]], **kwargs: Any) -> str:
@@ -839,6 +943,12 @@ def build_client(
             model_id=model_id,
             base_url=base_url or "http://localhost:4096",
             agent=opencode_agent,
+            timeout=request_timeout,
+        )
+    if backend and backend.lower() == "ollama":
+        return OllamaClient(
+            model_id=model_id,
+            base_url=base_url or "http://localhost:11434",
             timeout=request_timeout,
         )
     if model_id and model_id.lower().startswith(("gemini", "gemma")):
