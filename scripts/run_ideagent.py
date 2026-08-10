@@ -63,8 +63,9 @@ def main() -> None:
     clients, gen_kwargs, models = {}, {}, {}
     for role in ROLES:
         a = agents_cfg.get(role) or {}
+        backend = a.get("backend", client_cfg.get("backend"))
         model_id = a.get("model_id")
-        if not model_id:
+        if not model_id and backend != "opencode":
             raise ValueError(f"agents.{role}.model_id must be set in {args.config}")
         # Per-role override so roles can mix providers (e.g. ideator on OpenAI, the rest on
         # Gemini) -- falls back to the global client.api_key_env when a role doesn't
@@ -73,10 +74,13 @@ def main() -> None:
         raw_client = build_client(
             model_id=model_id, vllm_port=int(a.get("port", 8000)),
             api_key_env=role_api_key_env, request_timeout=timeout,
+            backend=backend,
+            base_url=a.get("base_url", client_cfg.get("base_url")),
+            opencode_agent=a.get("opencode_agent", client_cfg.get("opencode_agent")),
         )
         clients[role] = TracedClient(raw_client, logger=trace_logger, role=role)
         gen_kwargs[role] = _sampling(a)
-        models[role] = model_id
+        models[role] = model_id or "opencode/current"
     print("Agents:")
     for role in ROLES:
         print(f"  {role:<9}: {models[role]}")

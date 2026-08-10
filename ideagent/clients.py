@@ -1,7 +1,8 @@
 """LLM clients for the agentic ideation system.
 
-vLLM (OpenAI-compatible, local server), Gemini (google-genai), OpenAI-hosted (real
-api.openai.com), and Claude (anthropic's direct Anthropic API client) backends.
+vLLM (OpenAI-compatible, local server), OpenCode (local opencode server), Gemini
+(google-genai), OpenAI-hosted (real api.openai.com), and Claude (anthropic's direct
+Anthropic API client) backends.
 ``build_client`` routes any model whose name starts with ``gemini`` or ``gemma`` to the
 Gemini backend (its port is ignored) -- Gemma models are served through the same
 google.genai.Client as Gemini -- any model starting with ``gpt-`` to the OpenAI backend
@@ -21,6 +22,9 @@ import json
 import os
 import random
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Protocol
 
@@ -245,6 +249,168 @@ class VLLMOpenAIClient(_ResponseMetadataMixin):
     async def generate_async(self, messages: list[dict[str, str]], **kwargs: Any) -> str:
         # Reuses the sync generate (which already has retry) via asyncio.to_thread so the
         # event loop is not blocked during the HTTP round-trip.
+        return await asyncio.to_thread(self.generate, messages, **kwargs)
+
+
+class OpenCodeClient(_ResponseMetadataMixin):
+    """Client for a running `opencode serve` HTTP server.
+
+    OpenCode owns provider credentials and model selection in its own auth/config store. If
+    model_id is omitted, requests let OpenCode use its current/default model.
+    """
+
+    def __init__(
+        self,
+        *,
+        model_id: str | None,
+        base_url: str = "http://localhost:4096",
+        agent: str | None = None,
+        timeout: float = 120.0,
+        username_env: str = "OPENCODE_SERVER_USERNAME",
+        password_env: str = "OPENCODE_SERVER_PASSWORD",
+    ) -> None:
+        self.model_id = model_id
+        self.base_url = base_url.rstrip("/")
+        self.agent = agent
+        self.timeout = float(timeout)
+        self.username = os.environ.get(username_env, "opencode")
+        self.password = os.environ.get(password_env)
+        self._init_response_metadata()
+
+    def _headers(self) -> dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        if self.password:
+            import base64
+
+            token = base64.b64encode(f"{self.username}:{self.password}".encode()).decode()
+            headers["Authorization"] = f"Basic {token}"
+        return headers
+
+    def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> Any:
+        body = None if payload is None else json.dumps(payload).encode("utf-8")
+        request = urllib.request.Request(
+            f"{self.base_url}{path}",
+            data=body,
+            method=method,
+            headers=self._headers(),
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                raw = response.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(
+                f"OpenCode server returned HTTP {exc.code} for {method} {path}: {detail}"
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(
+                f"Could not reach OpenCode server at {self.base_url}. "
+                "Start it with `opencode serve --port 4096` or set client.base_url."
+            ) from exc
+        return json.loads(raw) if raw.strip() else None
+
+    @staticmethod
+    def _format_messages(
+        messages: list[dict[str, str]], response_format: dict[str, Any] | None = None
+    ) -> str:
+        blocks: list[str] = []
+        for msg in messages:
+            role = str(msg.get("role", "user")).upper()
+            content = str(msg.get("content", "")).strip()
+            if content:
+                blocks.append(f"{role}:\n{content}")
+        if response_format is not None:
+            schema = (response_format.get("json_schema") or {}).get("schema")
+            if schema:
+                blocks.append(
+                    "OUTPUT FORMAT:\nRespond with a single JSON object matching exactly this "
+                    "JSON Schema. Output the JSON object only, with no markdown fences or extra "
+                    "text:\n"
+                    + json.dumps(schema, indent=2)
+                )
+        return "\n\n".join(blocks)
+
+    @staticmethod
+    def _model_payload(model_id: str | None) -> dict[str, str] | str | None:
+        if not model_id or model_id.lower() in {"auto", "current", "default", "opencode/default"}:
+            return None
+        if "/" not in model_id:
+            return model_id
+        provider_id, model = model_id.split("/", 1)
+        return {"providerID": provider_id, "modelID": model}
+
+    @staticmethod
+    def _extract_text(response: Any) -> str:
+        if not isinstance(response, dict):
+            raise ValueError("OpenCode response was not a JSON object")
+        info = response.get("info") or {}
+        if isinstance(info, dict) and "structured_output" in info:
+            return json.dumps(info["structured_output"], ensure_ascii=False)
+        if isinstance(info, dict) and "structuredOutput" in info:
+            return json.dumps(info["structuredOutput"], ensure_ascii=False)
+        texts: list[str] = []
+        for part in response.get("parts") or []:
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") == "text":
+                text = part.get("text") or part.get("content")
+                if isinstance(text, str) and text.strip():
+                    texts.append(text)
+        if not texts:
+            raise ValueError("OpenCode response did not contain text or structured output")
+        return "\n".join(texts).strip()
+
+    def _create_session(self) -> str:
+        session = self._request("POST", "/session", {"title": "IDEAgent backend call"})
+        if not isinstance(session, dict) or not session.get("id"):
+            raise ValueError("OpenCode session creation did not return an id")
+        return str(session["id"])
+
+    def _message_body(self, messages: list[dict[str, str]], kwargs: dict[str, Any]) -> dict[str, Any]:
+        body: dict[str, Any] = {
+            "parts": [{
+                "type": "text",
+                "text": self._format_messages(messages, kwargs.get("response_format")),
+            }],
+            # IDEAgent wants a raw LLM backend. Keeping tools empty prevents the coding agent
+            # from editing files while it is only supposed to score or generate text.
+            "tools": {},
+        }
+        model = self._model_payload(kwargs.get("model_id") or self.model_id)
+        if model is not None:
+            body["model"] = model
+        if self.agent:
+            body["agent"] = self.agent
+        return body
+
+    def generate(self, messages: list[dict[str, str]], **kwargs: Any) -> str:
+        return self.generate_many(messages, n=1, **kwargs)[0]
+
+    @_retry
+    def generate_many(self, messages: list[dict[str, str]], *, n: int = 1, **kwargs: Any) -> list[str]:
+        if int(n) <= 0:
+            raise ValueError("n must be a positive integer")
+        outputs: list[str] = []
+        metadata: list[dict[str, Any]] = []
+        for _ in range(int(n)):
+            session_id = self._create_session()
+            body = self._message_body(messages, kwargs)
+            response = self._request(
+                "POST",
+                f"/session/{urllib.parse.quote(session_id, safe='')}/message",
+                body,
+            )
+            outputs.append(self._extract_text(response))
+            info = response.get("info") if isinstance(response, dict) else None
+            metadata.append({
+                "session_id": session_id,
+                "message_id": (info or {}).get("id") if isinstance(info, dict) else None,
+                "response_model": self.model_id,
+            })
+        self._set_response_metadata({"opencode_calls": metadata})
+        return outputs
+
+    async def generate_async(self, messages: list[dict[str, str]], **kwargs: Any) -> str:
         return await asyncio.to_thread(self.generate, messages, **kwargs)
 
 
@@ -664,7 +830,17 @@ def build_client(
     vllm_port: int = 8000,
     api_key_env: str = "VLLM_API_KEY",
     request_timeout: float = 120.0,
+    backend: str | None = None,
+    base_url: str | None = None,
+    opencode_agent: str | None = None,
 ) -> LLMClient:
+    if backend and backend.lower() == "opencode":
+        return OpenCodeClient(
+            model_id=model_id,
+            base_url=base_url or "http://localhost:4096",
+            agent=opencode_agent,
+            timeout=request_timeout,
+        )
     if model_id and model_id.lower().startswith(("gemini", "gemma")):
         return GeminiClient(model_id=model_id, api_key_env=api_key_env, timeout=request_timeout)
     if model_id and model_id.lower().startswith("gpt-"):

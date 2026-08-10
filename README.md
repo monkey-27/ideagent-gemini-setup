@@ -53,6 +53,32 @@ pip install -e .
 Set the relevant API keys as environment variables or in a `.env` file
 (`OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY` — see `ideagent/clients.py`).
 
+### OpenCode backend
+
+To route calls through OpenCode instead of setting provider API keys in IDEAgent, use
+the one-command wrapper:
+
+```bash
+python scripts/run_ideagent_opencode.py
+```
+
+The wrapper reuses OpenCode if it is already listening at `localhost:4096`; otherwise it
+opens the OpenCode TUI first so you can choose the model from `/models` or the model
+dropdown. After you select the model, quit OpenCode and the wrapper starts
+`opencode serve --port 4096`, waits for it, runs IDEAgent, and shuts down the server it
+launched. It uses:
+
+```bash
+python scripts/run_ideagent.py --config configs/ideagent_opencode_smoke.yaml
+```
+
+The OpenCode config omits `agents.*.model_id`, so OpenCode uses the model selected in
+its interface/config. To skip the model picker and use OpenCode's saved/default model:
+
+```bash
+python scripts/run_ideagent_opencode.py --skip-model-picker
+```
+
 ## 🚀 Run IDEAgent (main system)
 
 ```bash
