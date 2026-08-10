@@ -97,6 +97,7 @@ class Config:
     press_nb_target: int = 90
     press_soundness_target: float = 80.0
     press_clarity_target: int = 80
+    feasibility_prompt_mode: str = "generic"
     press_feasibility_target: int = 0
     rejected_pending_cap: int = 20
     consolidate_every: int = 12
