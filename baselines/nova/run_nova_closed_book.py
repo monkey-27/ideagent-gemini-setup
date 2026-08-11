@@ -77,12 +77,16 @@ def main() -> None:
         vllm_port=int(generator_cfg.get("port", 8000)),
         api_key_env=generator_cfg.get("api_key_env", default_api_key_env),
         request_timeout=timeout,
+        backend=generator_cfg.get("backend", client_cfg.get("backend")),
+        base_url=generator_cfg.get("base_url", client_cfg.get("base_url")),
     )
     raw_steno = build_client(
         model_id=steno_model,
         vllm_port=int(steno_cfg.get("port", 8000)),
         api_key_env=steno_cfg.get("api_key_env", default_api_key_env),
         request_timeout=timeout,
+        backend=steno_cfg.get("backend", client_cfg.get("backend")),
+        base_url=steno_cfg.get("base_url", client_cfg.get("base_url")),
     )
     judge_model = judge_cfg.get("model_id")
     raw_judge = (
@@ -91,6 +95,8 @@ def main() -> None:
             vllm_port=int(judge_cfg.get("port", 8000)),
             api_key_env=judge_cfg.get("api_key_env", default_api_key_env),
             request_timeout=timeout,
+            backend=judge_cfg.get("backend", client_cfg.get("backend")),
+            base_url=judge_cfg.get("base_url", client_cfg.get("base_url")),
         )
         if judge_model
         else None

@@ -1,11 +1,11 @@
-# 🧠 IDEAgent
+# ?? IDEAgent
 
 **Agentic Quality-Diversity Search for Research Idea Generation**
 
 An agentic quality-diversity (QD) search system for generating research ideas,
 plus baseline generation methods used for comparison.
 
-## 📖 Abstract
+## ?? Abstract
 
 > Large Language Models (LLMs) have significantly automated the process of scientific
 > discovery over the past few years. However, existing systems share one core limitation:
@@ -26,32 +26,32 @@ plus baseline generation methods used for comparison.
 > through an analysis of quality improvements, showing that repair and refinement are
 > crucial for building logical rigor and clarity while preserving non-obviousness.
 
-## 🗂️ What Is Here
+## ??? What Is Here
 
 ```text
 .
-├── ideagent/          # runtime package: IDEAgent's search/repair/refinement
-│                      # loop, quality + diversity evaluators, shared infra
-├── baselines/
-│   ├── simple/        # stateless-independent, single-shot batch, and
-│   │                  # sequential-memory baselines
-│   └── nova/          # NOVA-style closed-book baseline
-├── scripts/           # runners and evaluators (run_ideagent.py,
-│                      # eval_ideas.py, select_lineage_representatives.py)
-├── configs/           # canonical YAML configs for each pipeline
-└── data/
-    ├── bkgd_papers.jsonl  # topic input data
-    └── examples/          # sample generations from IDEAgent and every baseline
+??? ideagent/          # runtime package: IDEAgent's search/repair/refinement
+?                      # loop, quality + diversity evaluators, shared infra
+??? baselines/
+?   ??? simple/        # stateless-independent, single-shot batch, and
+?   ?                  # sequential-memory baselines
+?   ??? nova/          # NOVA-style closed-book baseline
+??? scripts/           # runners and evaluators (run_ideagent.py,
+?                      # eval_ideas.py, select_lineage_representatives.py)
+??? configs/           # canonical YAML configs for each pipeline
+??? data/
+    ??? bkgd_papers.jsonl  # topic input data
+    ??? examples/          # sample generations from IDEAgent and every baseline
 ```
 
-## ⚙️ Setup
+## ?? Setup
 
 ```bash
 pip install -e .
 ```
 
 Set the relevant API keys as environment variables or in a `.env` file
-(`OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY` — see `ideagent/clients.py`).
+(`OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY` ? see `ideagent/clients.py`).
 
 ### OpenCode backend
 
@@ -93,13 +93,33 @@ starts `ollama serve`, waits for it, runs IDEAgent, and shuts down the server it
 launched. If `--model` is omitted, it uses `$OLLAMA_MODEL`, then the first installed
 Ollama model from `/api/tags`.
 
-## 🚀 Run IDEAgent (main system)
+### vLLM baseline backend
+
+To run the baseline ladders against a local vLLM OpenAI-compatible server instead of
+hosted LLM providers:
+
+```bash
+python scripts/run_baseline_vllm.py --mode stateless --model Qwen/Qwen2.5-7B-Instruct
+```
+
+Modes are `stateless`, `single-shot`, `sequential`, and `nova`. The wrapper reuses vLLM
+if it is already listening at `localhost:8000`; otherwise it starts:
+
+```bash
+vllm serve Qwen/Qwen2.5-7B-Instruct --port 8000
+```
+
+All generator, steno, and judge roles in the selected baseline are pointed at that same
+local vLLM model, so no `OPENAI_API_KEY`, `GEMINI_API_KEY`, or `ANTHROPIC_API_KEY` is
+needed.
+
+## ?? Run IDEAgent (main system)
 
 ```bash
 python scripts/run_ideagent.py --config configs/ideagent.yaml
 ```
 
-## 🧪 Run a Baseline
+## ?? Run a Baseline
 
 ```bash
 # Stateless-independent or single-shot batch
@@ -113,7 +133,7 @@ python baselines/simple/sequential_memory.py --config baselines/simple/sequentia
 python baselines/nova/run_nova_closed_book.py --config baselines/nova/nova_closed_book.yaml
 ```
 
-## 📊 Evaluate
+## ?? Evaluate
 
 Runs both quality and diversity eval in one command:
 
@@ -130,14 +150,14 @@ Pass `--skip-quality` or `--skip-diversity` to run only one half. `--start-idx`/
 `--end-idx` slice the topic list for sharding a run. `--max-workers` overrides
 both evaluators' concurrency.
 
-## 🏆 Results
+## ?? Results
 
-Mean Yield across 32 topics spanning 8 CS domains. Yield(τ) is the size of the
-largest mutually-diverse (pairwise diversity ≥ 7) subset of an archive that is
-simultaneously sound (≥ 7), clear (≥ 6), and non-obvious (≥ τ); Yield(τ=7) is the
+Mean Yield across 32 topics spanning 8 CS domains. Yield(?) is the size of the
+largest mutually-diverse (pairwise diversity ? 7) subset of an archive that is
+simultaneously sound (? 7), clear (? 6), and non-obvious (? ?); Yield(?=7) is the
 primary metric reported in the paper.
 
-| Method                 | Yield (τ=7, primary) | Yield (τ=6) |
+| Method                 | Yield (?=7, primary) | Yield (?=6) |
 | ----------------------- | :-------------------: | :----------: |
 | **IDEAgent (ours)**     | **1.09**               | **2.31**     |
 | NOVA Closed-Book        | 0.28                   | 1.16         |
@@ -145,14 +165,14 @@ primary metric reported in the paper.
 | Sequential-Memory       | 0.19                   | 0.53         |
 | Single-Shot Batch       | 0.00                   | 0.00         |
 
-IDEAgent outperforms the best baseline (NOVA) by **3.89×** on Yield(τ=7).
+IDEAgent outperforms the best baseline (NOVA) by **3.89?** on Yield(?=7).
 
-## 💡 Examples
+## ?? Examples
 
 `data/examples/` holds sample generations from IDEAgent and every baseline, one
 JSONL file per method, over the same fixed set of topics for direct comparison.
 
-## 📄 Citation
+## ?? Citation
 
 ```bibtex
 @misc{gumma2026ideagentagenticqualitydiversitysearch,

@@ -1,0 +1,45 @@
+data:
+  input_jsonl: data/gemini_smoke_topic.jsonl
+  output_dir: results/vllm-nova-closed-book-baseline
+
+nova:
+  rounds: 2
+  ideas_per_round: 3
+  seed_directions: true
+  seeds_per_round: 2
+  final_k: 3
+  init_topic_idx: 0
+  end_topic_idx: 1
+  resume: true
+  min_idea_chars: 200
+  signature_char_cap: 256
+  max_background_tokens: 800
+
+client:
+  backend: vllm
+  api_key_env: VLLM_API_KEY
+  request_timeout: 3600
+
+generator:
+  model_id: Qwen/Qwen2.5-7B-Instruct
+  port: 8000
+  temperature: 0.7
+  top_p: 0.95
+  enable_thinking: false
+  max_new_tokens: 2048
+
+steno:
+  model_id: Qwen/Qwen2.5-7B-Instruct
+  port: 8000
+  temperature: 0.2
+  top_p: 0.95
+  enable_thinking: false
+  max_new_tokens: 1024
+
+judge:
+  model_id: Qwen/Qwen2.5-7B-Instruct
+  port: 8000
+  temperature: 0.2
+  top_p: 0.95
+  enable_thinking: false
+  max_new_tokens: 2048

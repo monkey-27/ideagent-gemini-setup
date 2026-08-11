@@ -117,7 +117,7 @@ def _retry(fn: Callable) -> Callable:
 
 
 def _async_retry(fn: Callable) -> Callable:
-    """Async version of ``_retry`` — uses ``asyncio.sleep`` so it never blocks the event loop."""
+    """Async version of ``_retry`` ? uses ``asyncio.sleep`` so it never blocks the event loop."""
     try:
         import backoff  # type: ignore
 
@@ -938,6 +938,13 @@ def build_client(
     base_url: str | None = None,
     opencode_agent: str | None = None,
 ) -> LLMClient:
+    if backend and backend.lower() == "vllm":
+        return VLLMOpenAIClient(
+            model_id=model_id,
+            port=vllm_port,
+            api_key_env=api_key_env,
+            timeout=request_timeout,
+        )
     if backend and backend.lower() == "opencode":
         return OpenCodeClient(
             model_id=model_id,
