@@ -136,6 +136,30 @@ def _normalized_usage(usage: dict[str, Any]) -> dict[str, int]:
     }
 
 
+def _live_progress_enabled() -> bool:
+    return os.environ.get("IDEAGENT_LIVE_PROGRESS", "").lower() in {"1", "true", "yes", "on"}
+
+
+def _context_summary(context: dict[str, Any]) -> str:
+    parts = []
+    for key in ("topic_id", "stage", "candidate_id", "generation_index", "target_paper_id"):
+        value = context.get(key)
+        if value not in (None, ""):
+            parts.append(f"{key}={value}")
+    return " ".join(parts)
+
+
+def _print_live_progress(role: str, state: str, *, context: dict[str, Any], detail: str = "") -> None:
+    if not _live_progress_enabled():
+        return
+    summary = _context_summary(context)
+    suffix = " ".join(part for part in (summary, detail) if part)
+    line = f"[ideagent] {role:<7} {state}"
+    if suffix:
+        line += f" | {suffix}"
+    print(line, flush=True)
+
+
 def summarize_experiment_trace(
     path: str | Path, *, run_id: str | None = None
 ) -> dict[str, Any]:
@@ -242,6 +266,7 @@ class TracedClient:
             messages=messages,
             request_kwargs=kwargs,
         )
+        _print_live_progress(self.trace_role, "started", context=context, detail=f"method={method}")
         return call_id, time.perf_counter(), context
 
     def _complete(
@@ -249,6 +274,7 @@ class TracedClient:
     ) -> None:
         metadata_getter = getattr(self._client, "get_last_response_metadata", None)
         response_metadata = metadata_getter() if callable(metadata_getter) else None
+        latency_seconds = round(time.perf_counter() - started, 6)
         self.trace_logger.log(
             "model_call_completed",
             call_id=call_id,
@@ -256,14 +282,21 @@ class TracedClient:
             model_id=self.model_id,
             method=method,
             context=context,
-            latency_seconds=round(time.perf_counter() - started, 6),
+            latency_seconds=latency_seconds,
             response_metadata=response_metadata,
             output=output,
+        )
+        _print_live_progress(
+            self.trace_role,
+            "done",
+            context=context,
+            detail=f"method={method} latency={latency_seconds:.2f}s",
         )
 
     def _failed(
         self, *, call_id: str, started: float, method: str, context: dict[str, Any], exc: Exception
     ) -> None:
+        latency_seconds = round(time.perf_counter() - started, 6)
         self.trace_logger.log(
             "model_call_failed",
             call_id=call_id,
@@ -271,9 +304,15 @@ class TracedClient:
             model_id=self.model_id,
             method=method,
             context=context,
-            latency_seconds=round(time.perf_counter() - started, 6),
+            latency_seconds=latency_seconds,
             error_type=type(exc).__name__,
             error_message=str(exc),
+        )
+        _print_live_progress(
+            self.trace_role,
+            "failed",
+            context=context,
+            detail=f"method={method} latency={latency_seconds:.2f}s error={type(exc).__name__}",
         )
 
     def generate(self, messages: list[dict[str, str]], **kwargs: Any) -> str:

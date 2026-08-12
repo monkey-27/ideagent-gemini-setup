@@ -55,8 +55,23 @@ Set the relevant API keys as environment variables or in a `.env` file
 
 ### OpenCode backend
 
+To open the OpenCode TUI automatically and watch IDEAgent run as visible shell output:
+
+```bash
+python scripts/run_ideagent_in_opencode.py
+```
+
+This submits the IDEAgent command into OpenCode as if you typed it, with live role
+progress lines for `ideator`, `critic`, `quality`, `steno`, and `judge`.
+
+To pick from the OpenCode model dropdown before the run submits:
+
+```bash
+python scripts/run_ideagent_in_opencode.py --open-models --submit-delay 15
+```
+
 To route calls through OpenCode instead of setting provider API keys in IDEAgent, use
-the one-command wrapper:
+the headless/backend wrapper:
 
 ```bash
 python scripts/run_ideagent_opencode.py
