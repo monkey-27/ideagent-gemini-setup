@@ -5,6 +5,10 @@
 An agentic quality-diversity (QD) search system for generating research ideas,
 plus baseline generation methods used for comparison.
 
+This fork is configured for practical local use: OpenCode project commands for real
+ideation, an auto-starting OpenCode backend helper, Ollama support, and vLLM baseline
+runners.
+
 ## ?? Abstract
 
 > Large Language Models (LLMs) have significantly automated the process of scientific
@@ -44,7 +48,180 @@ plus baseline generation methods used for comparison.
     ??? examples/          # sample generations from IDEAgent and every baseline
 ```
 
-## ?? Setup
+## Quick Start: Real Ideation With OpenCode
+
+Fresh clone and install:
+
+```bash
+cd ~
+rm -rf ideagent-gemini-setup
+
+git clone https://github.com/monkey-27/ideagent-gemini-setup.git
+cd ideagent-gemini-setup
+
+python3.12 -m venv .venv
+source .venv/bin/activate
+
+python -m pip install --upgrade pip
+python -m pip install -e .
+```
+
+Open the OpenCode interface from the same terminal:
+
+```bash
+opencode --port 4096
+```
+
+Inside OpenCode:
+
+1. Use **Build** mode.
+2. Pick your model from the model dropdown.
+3. Type:
+
+```text
+/ideagent
+```
+
+That starts a real one-topic IDEAgent ideation run using:
+
+```bash
+configs/ideagent_opencode.yaml
+```
+
+For a tiny plumbing test instead of real ideation, type:
+
+```text
+/ideagent smoke
+```
+
+Results are written to:
+
+```bash
+results/opencode-ideagent/
+```
+
+During the run you should see progress lines like:
+
+```text
+[ideagent] ideator started | topic_id=...
+[ideagent] quality done | topic_id=...
+[ideagent] judge started | topic_id=...
+```
+
+The final ideas are in a JSONL file under the result directory, usually:
+
+```bash
+results/opencode-ideagent/final_idea_cores.jsonl
+```
+
+## OpenCode: What Runs Where
+
+Run these in your normal terminal:
+
+```bash
+cd ~/ideagent-gemini-setup
+source .venv/bin/activate
+opencode --port 4096
+```
+
+Run these inside OpenCode:
+
+```text
+/ideagent
+```
+
+Use **Build** mode for real runs. Plan mode is only for asking OpenCode to explain or
+inspect things.
+
+The `/ideagent` command calls:
+
+```bash
+bash scripts/run_ideagent_from_opencode.sh configs/ideagent_opencode.yaml
+```
+
+That helper checks whether OpenCode is reachable on port `4096`. Starting OpenCode as
+`opencode --port 4096` is the best path because IDEAgent talks to the same OpenCode
+session where you picked the model from the dropdown. If nothing is listening on `4096`,
+the helper starts `opencode serve --port 4096` in the background, waits for it, and then
+runs IDEAgent with live progress enabled.
+
+## Troubleshooting
+
+### `Could not reach OpenCode server at http://localhost:4096`
+
+This means IDEAgent started, but the OpenCode HTTP backend was not running. Pull the
+latest repo and start OpenCode on the expected port:
+
+```bash
+opencode --port 4096
+```
+
+Then use `/ideagent`; the helper also starts a headless server automatically if needed.
+
+Manual terminal fallback if you are not using the OpenCode TUI:
+
+```bash
+cd ~/ideagent-gemini-setup
+source .venv/bin/activate
+
+opencode serve --port 4096 > opencode-server.log 2>&1 &
+bash scripts/run_ideagent_from_opencode.sh configs/ideagent_opencode.yaml
+```
+
+### `ModuleNotFoundError: No module named 'tqdm'`
+
+The package was not installed into the active environment.
+
+```bash
+cd ~/ideagent-gemini-setup
+source .venv/bin/activate
+python -m pip install -e .
+```
+
+### `/ideagent` does not show up
+
+You probably have an older clone.
+
+```bash
+cd ~/ideagent-gemini-setup
+git pull
+ls .opencode/commands
+```
+
+You should see `ideagent.md` and `ideate.md`.
+
+### `OpenCode is already listening on localhost:4096`
+
+That message comes from the older Python launcher path. Use the normal OpenCode flow
+above, or stop the old OpenCode process:
+
+```bash
+pkill -f "opencode"
+```
+
+Then reopen:
+
+```bash
+opencode --port 4096
+```
+
+### It looks stuck
+
+Check the server log in a normal terminal:
+
+```bash
+tail -f opencode-server.log
+```
+
+Check whether output files are being written:
+
+```bash
+find results/opencode-ideagent -type f | sort
+```
+
+## Standard Python Setup
+
+For non-OpenCode runs:
 
 ```bash
 pip install -e .
@@ -55,10 +232,10 @@ Set the relevant API keys as environment variables or in a `.env` file
 
 ### OpenCode backend
 
-Recommended OpenCode-native flow:
+OpenCode-native flow:
 
 ```bash
-opencode
+opencode --port 4096
 ```
 
 Pick your model from OpenCode's model dropdown, then type:
@@ -74,11 +251,10 @@ or use the project command:
 ```
 
 OpenCode reads `AGENTS.md` and the project command in `.opencode/commands/`, then runs
-IDEAgent through its shell tool using the model selected in OpenCode. The default is a
-real one-topic ideation run:
+IDEAgent through its shell tool. The default is a real one-topic ideation run:
 
 ```bash
-python scripts/run_ideagent.py --config configs/ideagent_opencode.yaml
+bash scripts/run_ideagent_from_opencode.sh configs/ideagent_opencode.yaml
 ```
 
 For a quick plumbing check instead of a real topic, type:

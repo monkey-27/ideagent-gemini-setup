@@ -11,16 +11,18 @@ Use the OpenCode-selected model. Do not add a model name to the IDEAgent command
 Default real ideation run:
 
 ```bash
-if [ -x .venv/bin/python ]; then PY=.venv/bin/python; elif command -v python3.12 >/dev/null 2>&1; then PY=python3.12; elif command -v python3 >/dev/null 2>&1; then PY=python3; else PY=python; fi
-IDEAGENT_LIVE_PROGRESS=1 PYTHONUNBUFFERED=1 "$PY" -u scripts/run_ideagent.py --config configs/ideagent_opencode.yaml
+bash scripts/run_ideagent_from_opencode.sh configs/ideagent_opencode.yaml
 ```
 
 Quick smoke test, only if the user asks for smoke, quick, test, or plumbing:
 
 ```bash
-if [ -x .venv/bin/python ]; then PY=.venv/bin/python; elif command -v python3.12 >/dev/null 2>&1; then PY=python3.12; elif command -v python3 >/dev/null 2>&1; then PY=python3; else PY=python; fi
-IDEAGENT_LIVE_PROGRESS=1 PYTHONUNBUFFERED=1 "$PY" -u scripts/run_ideagent.py --config configs/ideagent_opencode_smoke.yaml
+bash scripts/run_ideagent_from_opencode.sh configs/ideagent_opencode_smoke.yaml
 ```
+
+The helper starts `opencode serve --port 4096` automatically if IDEAgent cannot reach
+the OpenCode HTTP server. Do not ask the user to open a second terminal for that common
+case.
 
 If a dependency is missing, install the project into the active environment:
 
@@ -29,4 +31,3 @@ python -m pip install -e .
 ```
 
 Do not edit source files during a run request. Show the command output and summarize where result files were written.
-
