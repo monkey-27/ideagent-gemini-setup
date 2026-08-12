@@ -2,22 +2,18 @@
 
     python scripts/run_ideagent_in_opencode.py
 
-This starts or attaches to an OpenCode TUI server, then submits a TUI bash prompt that
-runs IDEAgent with live role-progress lines enabled.
+This starts OpenCode with an initial task prompt. OpenCode then runs IDEAgent through
+its own bash tool, so progress appears as a normal OpenCode task instead of terminal
+output being injected into the TUI from a parent process.
 """
 from __future__ import annotations
 
 import argparse
-import base64
-import json
 import os
 import shlex
 import socket
 import subprocess
 import sys
-import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -56,58 +52,6 @@ def _server_ready(host: str, port: int, timeout: float = 1.0) -> bool:
         return False
 
 
-def _headers() -> dict[str, str]:
-    headers = {"Content-Type": "application/json"}
-    password = os.environ.get("OPENCODE_SERVER_PASSWORD")
-    if password:
-        username = os.environ.get("OPENCODE_SERVER_USERNAME", "opencode")
-        token = base64.b64encode(f"{username}:{password}".encode()).decode()
-        headers["Authorization"] = f"Basic {token}"
-    return headers
-
-
-def _post(base_url: str, path: str, payload: dict | None = None, timeout: float = 10.0) -> bool:
-    body = None if payload is None else json.dumps(payload).encode("utf-8")
-    request = urllib.request.Request(
-        f"{base_url.rstrip('/')}{path}",
-        data=body,
-        method="POST",
-        headers=_headers(),
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            raw = response.read().decode("utf-8")
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"OpenCode returned HTTP {exc.code} for {path}: {detail}") from exc
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"Could not reach OpenCode TUI server at {base_url}") from exc
-    if not raw.strip():
-        return True
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError:
-        return True
-    return bool(parsed)
-
-
-def _wait_for_server(
-    host: str,
-    port: int,
-    *,
-    timeout: float,
-    process: subprocess.Popen | None,
-) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if _server_ready(host, port):
-            return
-        if process is not None and process.poll() is not None:
-            raise RuntimeError("OpenCode exited before its TUI server was reachable.")
-        time.sleep(0.5)
-    raise TimeoutError(f"Timed out waiting for OpenCode at {host}:{port}.")
-
-
 def _split_command(command: str) -> list[str]:
     parts = shlex.split(command, posix=(os.name != "nt"))
     if not parts:
@@ -115,7 +59,15 @@ def _split_command(command: str) -> list[str]:
     return parts
 
 
-def _tui_command(command: str, *, port: int, model: str | None, agent: str | None) -> list[str]:
+def _tui_command(
+    command: str,
+    *,
+    port: int,
+    model: str | None,
+    agent: str | None,
+    prompt: str,
+    auto: bool,
+) -> list[str]:
     parts = _split_command(command)
     if "--port" not in parts:
         parts.extend(["--port", str(port)])
@@ -123,16 +75,10 @@ def _tui_command(command: str, *, port: int, model: str | None, agent: str | Non
         parts.extend(["--model", model])
     if agent and "--agent" not in parts:
         parts.extend(["--agent", agent])
-    return parts
-
-
-def _attach_command(command: str, *, base_url: str) -> list[str]:
-    parts = _split_command(command)
-    if len(parts) >= 2 and parts[:2] == ["opencode", "attach"]:
-        if base_url not in parts:
-            parts.append(base_url)
-    if "--dir" not in parts:
-        parts.extend(["--dir", str(ROOT_DIR)])
+    if auto and "--auto" not in parts:
+        parts.append("--auto")
+    if "--prompt" not in parts:
+        parts.extend(["--prompt", prompt])
     return parts
 
 
@@ -140,7 +86,7 @@ def _quote_for_shell(value: str) -> str:
     return shlex.quote(value) if os.name != "nt" else value
 
 
-def _ideagent_prompt(config: Path, python_cmd: str) -> str:
+def _ideagent_shell_command(config: Path, python_cmd: str) -> str:
     rel_config = config
     try:
         rel_config = config.relative_to(ROOT_DIR)
@@ -157,24 +103,37 @@ def _ideagent_prompt(config: Path, python_cmd: str) -> str:
             f"{_quote_for_shell(python_cmd)} -u scripts/run_ideagent.py "
             f"--config {_quote_for_shell(str(rel_config))}"
         )
-    return "!" + command
+    return command
 
 
-def _start_visible_tui(args: argparse.Namespace, base_url: str, host: str, port: int) -> subprocess.Popen:
+def _opencode_task_prompt(shell_command: str) -> str:
+    return (
+        "Run IDEAgent in this repository with your bash/shell tool. "
+        "Show the command output in the OpenCode session and do not edit files. "
+        "Use this exact command:\n\n"
+        f"{shell_command}"
+    )
+
+
+def _start_visible_tui(args: argparse.Namespace, host: str, port: int, prompt: str) -> subprocess.Popen:
     env = os.environ.copy()
     env["IDEAGENT_LIVE_PROGRESS"] = "1"
     env["PYTHONUNBUFFERED"] = "1"
     if _server_ready(host, port):
-        cmd = _attach_command(args.opencode_attach_command, base_url=base_url)
-        print(f"Attaching OpenCode TUI: {' '.join(cmd)}")
+        raise RuntimeError(
+            f"OpenCode is already listening on {host}:{port}. "
+            "Close that session first, or pass a different config/base_url port."
+        )
     else:
         cmd = _tui_command(
             args.opencode_command,
             port=port,
             model=args.model,
             agent=args.agent,
+            prompt=prompt,
+            auto=not args.no_auto,
         )
-        print(f"Starting OpenCode TUI: {' '.join(cmd)}")
+        print("Starting OpenCode with an IDEAgent task prompt...")
     try:
         return subprocess.Popen(cmd, cwd=ROOT_DIR, env=env)
     except FileNotFoundError:
@@ -187,40 +146,31 @@ def main() -> int:
     parser.add_argument("--model", help="Optional OpenCode model, in provider/model format.")
     parser.add_argument("--agent", help="Optional OpenCode primary agent to start with.")
     parser.add_argument("--python", default=sys.executable or "python")
-    parser.add_argument("--startup-timeout", type=float, default=45.0)
-    parser.add_argument("--submit-delay", type=float, default=1.0)
+    parser.add_argument("--startup-timeout", type=float, default=45.0, help=argparse.SUPPRESS)
+    parser.add_argument("--submit-delay", type=float, default=1.0, help=argparse.SUPPRESS)
+    parser.add_argument("--no-auto", action="store_true", help="Do not pass --auto to OpenCode.")
     parser.add_argument(
         "--open-models",
         action="store_true",
-        help="Open OpenCode's model selector before submitting; combine with --submit-delay.",
+        help="Deprecated. Use --model provider/model, or pick a default model in OpenCode before running this.",
     )
     parser.add_argument("--opencode-command", default="opencode")
-    parser.add_argument("--opencode-attach-command", default="opencode attach")
     parser.add_argument("--dry-run", action="store_true", help="Print the prompt without starting OpenCode.")
     args = parser.parse_args()
 
     config_path = args.config if args.config.is_absolute() else ROOT_DIR / args.config
     base_url = _load_base_url(config_path)
     host, port = _host_port(base_url)
-    prompt = _ideagent_prompt(config_path, args.python)
+    shell_command = _ideagent_shell_command(config_path, args.python)
+    prompt = _opencode_task_prompt(shell_command)
     if args.dry_run:
         print(prompt)
         return 0
+    if args.open_models:
+        print("--open-models no longer injects into the TUI. Use --model provider/model, or set the default in OpenCode first.")
 
     try:
-        process = _start_visible_tui(args, base_url, host, port)
-        _wait_for_server(host, port, timeout=float(args.startup_timeout), process=process)
-        if args.open_models:
-            _post(base_url, "/tui/open-models")
-        time.sleep(max(0.0, float(args.submit_delay)))
-        _post(base_url, "/tui/clear-prompt")
-        _post(base_url, "/tui/append-prompt", {"text": prompt})
-        _post(base_url, "/tui/submit-prompt")
-        _post(
-            base_url,
-            "/tui/show-toast",
-            {"message": "IDEAgent run submitted. Watch the shell output for role progress."},
-        )
+        process = _start_visible_tui(args, host, port, prompt)
         return process.wait()
     except KeyboardInterrupt:
         return 130

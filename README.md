@@ -61,14 +61,19 @@ To open the OpenCode TUI automatically and watch IDEAgent run as visible shell o
 python scripts/run_ideagent_in_opencode.py
 ```
 
-This submits the IDEAgent command into OpenCode as if you typed it, with live role
-progress lines for `ideator`, `critic`, `quality`, `steno`, and `judge`.
+This starts OpenCode with a normal task prompt and asks OpenCode to run IDEAgent through
+its bash tool. The shell output includes live role progress lines for `ideator`,
+`critic`, `quality`, `steno`, and `judge`.
 
-To pick from the OpenCode model dropdown before the run submits:
+To force a specific OpenCode model for that run:
 
 ```bash
-python scripts/run_ideagent_in_opencode.py --open-models --submit-delay 15
+python scripts/run_ideagent_in_opencode.py --model ollama/gpt-oss:120b
 ```
+
+If `--model` is omitted, OpenCode uses its saved/default model. To change that default,
+open `opencode` normally once, pick the model from the dropdown, quit, then run the
+IDEAgent launcher.
 
 To route calls through OpenCode instead of setting provider API keys in IDEAgent, use
 the headless/backend wrapper:
